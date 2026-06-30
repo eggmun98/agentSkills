@@ -1,8 +1,8 @@
 # Frontend Clean Code Guide
 
-Version: v1
+Version: v2
 
-Last updated: 2026-06-25
+Last updated: 2026-06-30
 
 이 문서는 AI 에이전트와 사람이 프론트엔드 코드를 작성할 때 지켜야 할 코드 기준을 정리한다.
 
@@ -920,6 +920,48 @@ if (userRole === 'admin') {
 추상화는 읽는 맥락을 줄일 때 사용한다.
 
 추상화 때문에 오히려 이동해야 하는 위치가 늘어나면 직접 드러내는 쪽을 검토한다.
+
+### 코드 배치 순서 기준
+
+함수와 코드는 읽는 순서대로 배치한다.
+
+파일이나 컴포넌트를 위에서 아래로 읽을 때 흐름이 자연스럽게 이어지게 한다.
+
+진입점(공개 함수, orchestration 함수, `handleXxx`)을 위에 두고, 그 함수가 호출하는 헬퍼를 아래에 호출 순서대로 둔다.
+
+의미를 이해하려고 위아래로 스크롤을 반복하게 만들지 않는다.
+
+한 함수에서만 쓰는 헬퍼는 그 함수 근처에 둔다.
+
+상수와 타입은 사용처에서 멀어지지 않게 파일 상단이나 처음 쓰이는 위치 근처에 둔다.
+
+```ts
+// 금지: 헬퍼가 위에 흩어져 있어 진입점을 찾으려 아래까지 내려가고, 흐름을 보려 다시 올라온다.
+function buildRevealBoard() {}
+function applyRevealBoard() {}
+function playRevealSequence() {}
+
+export function handleReveal() {
+	const board = buildRevealBoard();
+	applyRevealBoard(board);
+	playRevealSequence();
+}
+```
+
+```ts
+// 권장: 진입점이 위, 호출되는 헬퍼가 아래에 호출 순서대로. 위에서 아래로 한 번에 읽힌다.
+export function handleReveal() {
+	const board = buildRevealBoard();
+	applyRevealBoard(board);
+	playRevealSequence();
+}
+
+function buildRevealBoard() {}
+function applyRevealBoard() {}
+function playRevealSequence() {}
+```
+
+호이스팅이나 순환 참조 때문에 순서를 바꿔야 하면 이유를 주석으로 남긴다.
 
 ### 타입 우회 기준
 
