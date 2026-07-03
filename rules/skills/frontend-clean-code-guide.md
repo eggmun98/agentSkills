@@ -1,8 +1,8 @@
 # Frontend Clean Code Guide
 
-Version: v3
+Version: v4
 
-Last updated: 2026-06-30
+Last updated: 2026-07-03
 
 이 문서는 AI 에이전트와 사람이 프론트엔드 코드를 작성할 때 지켜야 할 코드 기준을 정리한다.
 
@@ -39,6 +39,18 @@ Last updated: 2026-06-30
 - props drilling이나 거대한 state/store를 만들지 않는다.
 - 숫자에 도메인 의미가 있으면 상수화한다.
 - 예외적으로 규칙을 지키지 못하면 이유를 주석으로 남긴다.
+
+## AI 에이전트 응답 기준
+
+코드를 수정한 뒤에는 아래 내용을 짧게 보고한다.
+
+- 변경한 책임 위치
+- 새로 만든 함수/컴포넌트의 역할
+- side effect가 있는 함수
+- 규칙을 예외적으로 어긴 부분과 이유
+- 테스트 또는 확인 방법
+
+단순 구현 설명보다 설계 판단을 우선 설명한다.
 
 ## 작성 원칙
 
@@ -419,7 +431,19 @@ applyWinAmount(winAmount);
 
 일반 함수는 10줄 이하를 권장한다.
 
-일반 함수가 11줄 이상이면 분리할 수 없는 이유를 주석으로 남긴다.
+10줄을 넘으면 먼저 아래를 검토한다.
+
+- 조건 판단을 분리할 수 있는가?
+
+- 데이터 변환을 분리할 수 있는가?
+
+- side effect를 바깥으로 뺄 수 있는가?
+
+- 이름 있는 단계로 나눌 수 있는가?
+
+단, 한 흐름으로 읽히는 orchestration 함수라면 줄 수보다 읽기 흐름을 우선한다.
+
+억지로 줄 수를 맞추기 위한 wrapper 함수는 만들지 않는다.
 
 애니메이션/사운드/이벤트 시퀀스 함수는 20줄 이하를 권장한다.
 
@@ -906,6 +930,74 @@ function canStartBonus() {
 }
 ```
 
+### 도메인 개념 승격 기준
+
+반복해서 등장하는 조건이나 상태는 단순 boolean으로 흩뿌리지 않는다.
+
+아래 조건 중 2개 이상에 해당하면 도메인 개념으로 승격한다.
+
+- 여러 화면, 함수, 이벤트에서 반복된다.
+- API 응답, UI 표시, 로그, 통계, 권한, 결제 흐름과 연결된다.
+- 상태 종류가 늘어날 가능성이 있다.
+- 테스트 시나리오로 따로 다뤄야 한다.
+- 같은 조건을 기준으로 다른 side effect가 실행된다.
+
+이 경우 boolean flag 대신 명시적인 status, type, mode, policy, event로 모델링한다.
+
+```ts
+// 비권장
+if (site.expired) {
+	blockAccess();
+}
+
+if (site.expired) {
+	showRenewalPopup();
+}
+
+```
+
+```ts
+// 권장
+type SiteStatus = 'ACTIVE' | 'EXPIRED' | 'SUSPENDED';
+
+function canAccessSite(status: SiteStatus): boolean {
+	return status === 'ACTIVE';
+}
+
+function getSiteAccessPolicy(status: SiteStatus): SiteAccessPolicy {
+	if (status === 'EXPIRED') return expiredSitePolicy;
+	if (status === 'SUSPENDED') return suspendedSitePolicy;
+
+	return activeSitePolicy;
+}
+
+```
+
+### 상태 모델링 기준
+
+서로 배타적인 상태는 여러 boolean으로 표현하지 않는다.
+
+상태가 동시에 true일 수 없거나, 정해진 흐름을 가진다면 union type 또는 enum으로 표현한다.
+```ts
+// 비권장
+type RequestState = {
+	isLoading: boolean;
+	isSuccess: boolean;
+	isError: boolean;
+};
+```
+
+```ts
+// 권장
+type RequestStatus = 'idle' | 'loading' | 'success' | 'error';
+
+type RequestState = {
+	status: RequestStatus;
+	errorMessage?: string;
+};
+```
+
+
 ### 시점 이동 줄이기 기준
 
 코드를 이해하기 위해 위아래, 다른 파일, 다른 상수를 계속 따라가야 하는 구조를 줄인다.
@@ -1060,4 +1152,93 @@ if (console.log(result)) {
 
 ```ts
 // TEMP: 서버 이벤트 스키마 배포 전까지 기존 payload와 호환한다. 스키마 배포 후 제거한다.
+```
+
+### 에러 처리 기준
+
+에러를 삼키지 않는다.
+
+`catch`에서 `console.error`만 호출하고 끝내지 않는다.
+
+에러를 처리할 수 있으면 사용자에게 보여줄 상태로 변환한다.
+처리할 수 없으면 상위로 다시 throw한다.
+
+외부 API, storage, engine boundary에서 발생한 에러는 도메인 에러로 변환한다.
+
+```ts
+// 비권장
+try {
+	await loadAssets();
+} catch (error) {
+	console.error(error);
+}
+```
+
+```ts
+// 권장
+try {
+	await loadAssets();
+} catch (error) {
+	updateAssetLoadState({
+		status: 'error',
+		reason: getAssetLoadErrorReason(error),
+	});
+}
+```
+
+### 비동기 흐름 기준
+
+비동기 함수는 호출자가 기다려야 하는지 이름과 반환 타입으로 알 수 있어야 한다.
+
+`Promise`를 의도 없이 무시하지 않는다.
+
+순서가 중요한 비동기 작업은 orchestration 함수에서 `await` 순서를 명시한다.
+
+동시에 실행 가능한 작업은 `Promise.all`로 의도를 드러낸다.
+
+타이머, animation callback, event listener는 해제 조건을 함께 작성한다.
+
+```ts
+// 권장: 순서가 중요함
+await playIntroAnimation();
+await revealSymbols();
+await playWinAnimation();
+```
+
+```ts
+// 권장: 동시에 가능함
+await Promise.all([
+	preloadSounds(),
+	preloadImages(),
+	preloadSpineAssets(),
+]);
+```
+
+```ts
+// 비권장: 기다리는지 안 기다리는지 의도가 없음
+playIntroAnimation();
+revealSymbols();
+playWinAnimation();
+```
+
+### 이벤트 구독 기준
+
+이벤트를 구독하는 코드는 해제 위치를 함께 가져야 한다.
+
+컴포넌트 mount, scene enter, game start에서 등록한 listener는 unmount, scene exit, game end에서 해제한다.
+
+같은 이벤트를 여러 위치에서 중복 구독하지 않는다.
+
+이벤트 payload는 unknown으로 받지 않고 명시적인 타입 또는 parser를 둔다.
+
+```ts
+function subscribeBookEvents() {
+	eventEmitter.on('reveal', handleReveal);
+	eventEmitter.on('winInfo', handleWinInfo);
+
+	return () => {
+		eventEmitter.off('reveal', handleReveal);
+		eventEmitter.off('winInfo', handleWinInfo);
+	};
+}
 ```
